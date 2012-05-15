@@ -2,7 +2,6 @@
 
 import subprocess
 from subprocess import PIPE
-import StringIO
 import sys
 import re
 
@@ -11,9 +10,10 @@ class IndentPrinter(object):
 	def __init__(self, level=0, width=4):
 		self.level = level
 		self.width = width
-		self.prefix = " " * (width * level) 
-		if len(self.prefix) > 1:
-			self.prefix = self.prefix[:-1] + "|"
+		prefix = " " * width
+		prefix = prefix[:-2] + "| "
+		prefix = prefix * level
+		self.prefix = prefix
 
 	def println(self, lines):
 		for line in str(lines).split("\n"):
@@ -60,9 +60,6 @@ def contains(other_commit, commit):
 	base = lines[0]
 	return base == commit
 		
-		
-
-
 def getCommit(commit):
 	cmd = ["git", "log", "-n", "1", "--parents", commit]
 	p = subprocess.Popen(cmd, stdin=PIPE, stdout=PIPE)
@@ -71,6 +68,7 @@ def getCommit(commit):
 		raise err
 	return out
 
+# The sortof key/value pattern used in git log:
 __kv_pat = re.compile("^([^: ]+):?[ ]+(.*)$")
 
 def getKeyValue(line):
@@ -107,13 +105,17 @@ class CommitInfo(object):
 		message_lines = lines[count+1:-1]
 		self.message = message_lines
 
+		# We'll calculate these later as needed:
+		self.__lhs = None
+		self.__rhs = []
+
 	def __str__(self):
 		s =       "commit: " + self.commit
 		if len(self.parents) > 1: 
-			s = s + "\nMerge:  " + " ".join(self.parents)
+			pass # s = s + "\nMerge:  " + " ".join(self.parents)
 		s = s + "\nAuthor: " + self.author
 		s = s + "\nDate:   " + self.date
-		s = s + "\n\n" + "\n".join(self.message) + "\n"
+		s = s + "\n" + "\n".join(self.message) + "\n"
 		return s
 
 	def is_merge(self): return len(self.parents) > 1
@@ -124,13 +126,39 @@ class CommitInfo(object):
 		Unlike in Git, this is not specified by the order of the parents, but is 
 		calculated in a way to make history most readable."""
 		# TODO: For now, just use LHS:
-		if not self.parents: return None
-		else: return self.parents[0]
+		self.__calc_lhs()
+		return self.__lhs
 
 	def other_parents(self):
 		"""Return all parents but the lhs."""
-		# TODO: fix
-		return self.parents[1:]
+		self.__calc_lhs()
+		return self.__rhs
+
+	def __calc_lhs(self):
+		if not self.parents: return # Nothing to calculate. 
+		if self.__lhs: return # already calculated
+		
+		if self.is_pull():
+			self.__lhs = self.parents[1]
+			self.__rhs = self.parents[0:1] #(non-inclusive)
+			return
+
+		# Else, default to git-lhs:
+		self.__lhs = self.parents[0]
+		self.__rhs = self.parents[1:]
+			
+
+	__pull_pat = re.compile("[ ]*Merge branch .* of .* into .*")
+
+	def is_pull(self):
+		# Try to detect if this was the result of a 'git pull' from the commit message:
+		# ex:     Merge branch 'upstream' of ssh://url/to/git into myBranch
+		for line in self.message:
+			match = self.__pull_pat.match(line)
+			if match: return True
+		return False
+		
+
 
 def getCommitInfo(commit):
 	return CommitInfo(getCommit(commit))
