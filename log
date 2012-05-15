@@ -11,7 +11,7 @@ class IndentPrinter(object):
 		self.level = level
 		self.width = width
 		prefix = " " * width
-		prefix = prefix[:-2] + "| "
+		prefix = "|" + prefix[1:]
 		prefix = prefix * level
 		self.prefix = prefix
 
@@ -105,42 +105,63 @@ class CommitInfo(object):
 		message_lines = lines[count+1:-1]
 		self.message = message_lines
 
-		# We'll calculate these later as needed:
-		self.__lhs = None
-		self.__rhs = []
+		# Calculate whether the LHS needs to be changed to simplify logging:
+		self.__calc_lhs()
+		
+		
 
 	def __str__(self):
 		s =       "commit: " + self.commit
-		if len(self.parents) > 1: 
-			pass # s = s + "\nMerge:  " + " ".join(self.parents)
+
+		if self.is_merge(): 
+			if self.is_reordered(): s = s + "\nMerge*: "
+			else: s = s + "\nMerge:  "
+			parents = ([self.lhs()] + self.other_parents())
+			# use short merge hashes like in Git:
+			parents = map(lambda p: p[0:7], parents) 
+			s = s + " ".join(parents)
+
 		s = s + "\nAuthor: " + self.author
 		s = s + "\nDate:   " + self.date
-		s = s + "\n" + "\n".join(self.message) + "\n"
+		# TODO: Less hacky message indentation:
+		s = s + "\n" + "\n".join(self.message)
+		# if self.reorder_reason:
+		# 	s = s + "\n    (* " + self.reorder_reason + " *)"
+		s = s + "\n"
 		return s
 
 	def is_merge(self): return len(self.parents) > 1
 	def has_parent(self): return len(self.parents) > 0
 
+	def is_reordered(self):
+		"""Return true iff lhs/rhs reordering has taken place."""
+		if not self.is_merge(): return False
+		new_parents = [self.lhs()] + self.other_parents()
+		return new_parents != self.parents
+
 	def lhs(self):
 		"""Get the "left-hand-side" of a merge.
 		Unlike in Git, this is not specified by the order of the parents, but is 
 		calculated in a way to make history most readable."""
-		# TODO: For now, just use LHS:
-		self.__calc_lhs()
 		return self.__lhs
 
 	def other_parents(self):
 		"""Return all parents but the lhs."""
-		self.__calc_lhs()
 		return self.__rhs
 
 	def __calc_lhs(self):
-		if not self.parents: return # Nothing to calculate. 
-		if self.__lhs: return # already calculated
+		# Defaults:
+		self.__lhs = None  # The new left-hand-side (first parent) of the merge.
+		self.__rhs = [] # The rest of the merge parents
+		self.reorder_reason = None 
 		
-		if self.is_pull():
+		if not self.has_parent(): return # Nothing to calculate. 
+
+		pull_branch = self.is_pull()
+		if pull_branch:
 			self.__lhs = self.parents[1]
 			self.__rhs = self.parents[0:1] #(non-inclusive)
+			self.reorder_reason = "Treating pull of '" + pull_branch + "' as merge into mainline."
 			return
 
 		# Else, default to git-lhs:
@@ -148,15 +169,18 @@ class CommitInfo(object):
 		self.__rhs = self.parents[1:]
 			
 
-	__pull_pat = re.compile("[ ]*Merge branch .* of .* into .*")
+	__pull_pat = re.compile("[ ]*Merge branch '(.+)' of .* into .*")
 
 	def is_pull(self):
-		# Try to detect if this was the result of a 'git pull' from the commit message:
+		"""Try to detect if this was the result of a 'git pull' from the commit message.
+		Returns the name of the upstream branch if we detected a pull.  Else: None.
+		"""
 		# ex:     Merge branch 'upstream' of ssh://url/to/git into myBranch
+		if len(self.parents) != 2: return False
 		for line in self.message:
 			match = self.__pull_pat.match(line)
-			if match: return True
-		return False
+			if match: return match.group(1)
+		return None
 		
 
 
