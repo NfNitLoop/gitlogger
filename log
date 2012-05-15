@@ -11,7 +11,9 @@ class IndentPrinter(object):
 	def __init__(self, level=0, width=4):
 		self.level = level
 		self.width = width
-		self.prefix = " " * (width * level)
+		self.prefix = " " * (width * level) 
+		if len(self.prefix) > 1:
+			self.prefix = self.prefix[:-1] + "|"
 
 	def println(self, lines):
 		for line in str(lines).split("\n"):
@@ -20,6 +22,47 @@ class IndentPrinter(object):
 	def indent(self):
 		return IndentPrinter(level=self.level + 1, width=self.width)
 		
+class GitIndent(IndentPrinter):
+	"""This indenter remembers the context of the commits which it is outputting. 
+	This allows us to check that we're not displaying duplicate entries inside of indent.
+	"""
+	def __init__(self, level=0, width=4, commits=[], parent=None):
+		IndentPrinter.__init__(self, level=level, width=width)
+		self.commits = commits
+		self.parent = parent
+		
+	def indent(self):
+		return GitIndent(
+			level=self.level + 1
+			, width=self.width
+			, parent=self
+		)
+
+	def is_in_lhs(self, commit):
+		"""Return true if this commit will be in some other part of the left-hand-side.
+		"""
+		for other_commit in self.commits:
+			if contains(other_commit, commit): return True
+
+		if self.parent: return self.parent.is_in_lhs(commit)
+		else: return False
+
+	
+def contains(other_commit, commit):
+	"""Return true of commit is contained in other_commit's DAG."""
+	cmd = ["git", "merge-base", commit, other_commit]
+	p = subprocess.Popen(cmd, stdin=PIPE, stdout=PIPE)
+	(out, err) = p.communicate()
+	if err: 
+		raise Exception(err)
+
+	lines = out.split("\n")
+	base = lines[0]
+	return base == commit
+		
+		
+
+
 def getCommit(commit):
 	cmd = ["git", "log", "-n", "1", "--parents", commit]
 	p = subprocess.Popen(cmd, stdin=PIPE, stdout=PIPE)
@@ -66,6 +109,8 @@ class CommitInfo(object):
 
 	def __str__(self):
 		s =       "commit: " + self.commit
+		if len(self.parents) > 1: 
+			s = s + "\nMerge:  " + " ".join(self.parents)
 		s = s + "\nAuthor: " + self.author
 		s = s + "\nDate:   " + self.date
 		s = s + "\n\n" + "\n".join(self.message) + "\n"
@@ -90,12 +135,19 @@ class CommitInfo(object):
 def getCommitInfo(commit):
 	return CommitInfo(getCommit(commit))
 	
-def logHistory(commit, printer=IndentPrinter()):
+def logHistory(commit, printer=GitIndent()):
 	while commit:
+		# If we've reached a point that's already contained in LHS
+		# history, stop printing:
+		if printer.is_in_lhs(commit): break 
+
 		info = getCommitInfo(commit)
 		printer.println(info)
 		indent = printer.indent()
+		indent.commits = [info.lhs()]
 		for parent in info.other_parents():
+			# Don't display duplicate data:
+			if indent.is_in_lhs(parent): continue
 			logHistory(parent, indent)
 		# Continue logging LHS:
 		commit = info.lhs()
