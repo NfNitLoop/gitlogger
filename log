@@ -1,0 +1,112 @@
+#!/usr/bin/python
+
+import subprocess
+from subprocess import PIPE
+import StringIO
+import sys
+import re
+
+class IndentPrinter(object):
+	"""Utility to print lines at a given indent level."""
+	def __init__(self, level=0, width=4):
+		self.level = level
+		self.width = width
+		self.prefix = " " * (width * level)
+
+	def println(self, lines):
+		for line in str(lines).split("\n"):
+			print(self.prefix + line)
+
+	def indent(self):
+		return IndentPrinter(level=self.level + 1, width=self.width)
+		
+def getCommit(commit):
+	cmd = ["git", "log", "-n", "1", "--parents", commit]
+	p = subprocess.Popen(cmd, stdin=PIPE, stdout=PIPE)
+	(out, err) = p.communicate()
+	if err: 
+		raise err
+	return out
+
+__kv_pat = re.compile("^([^: ]+):?[ ]+(.*)$")
+
+def getKeyValue(line):
+	"""Split a line up into its key/value pair, returned as a tuple."""
+	match = __kv_pat.match(line)
+	if not match: raise "Not a key/value line: " + line
+	return match.group(1,2)
+	
+def remove_message_padding(line):
+	"""Git commit messages are padded with 4 spaces.  This removes them."""	
+	return line[4:]
+
+class CommitInfo(object):
+	def __init__(self, commit_text):
+		lines = commit_text.split("\n")
+		data = {}
+		count = 0
+		for line in lines:	
+			if not line: break # end on blank line
+			(k,v) = getKeyValue(line)
+			data[k] = v
+			count = count + 1
+
+		# Break parents out of the commit:
+		commit = data["commit"].split(" ")
+		self.commit = commit[0]
+		self.parents = commit[1:]
+		self.date = data["Date"]
+		self.author = data["Author"]
+		
+		# Count is a blank line.
+		# Git outputs a line return after the messages so the CLI will be on a new line
+		# But it's not part of the message:
+		message_lines = lines[count+1:-1]
+		self.message = message_lines
+
+	def __str__(self):
+		s =       "commit: " + self.commit
+		s = s + "\nAuthor: " + self.author
+		s = s + "\nDate:   " + self.date
+		s = s + "\n\n" + "\n".join(self.message) + "\n"
+		return s
+
+	def is_merge(self): return len(self.parents) > 1
+	def has_parent(self): return len(self.parents) > 0
+
+	def lhs(self):
+		"""Get the "left-hand-side" of a merge.
+		Unlike in Git, this is not specified by the order of the parents, but is 
+		calculated in a way to make history most readable."""
+		# TODO: For now, just use LHS:
+		if not self.parents: return None
+		else: return self.parents[0]
+
+	def other_parents(self):
+		"""Return all parents but the lhs."""
+		# TODO: fix
+		return self.parents[1:]
+
+def getCommitInfo(commit):
+	return CommitInfo(getCommit(commit))
+	
+def logHistory(commit, printer=IndentPrinter()):
+	while commit:
+		info = getCommitInfo(commit)
+		printer.println(info)
+		indent = printer.indent()
+		for parent in info.other_parents():
+			logHistory(parent, indent)
+		# Continue logging LHS:
+		commit = info.lhs()
+
+def main(args):
+	if args:
+		commit = args[0]
+	else:
+		commit = "HEAD"
+	logHistory(commit)
+
+if __name__ == "__main__":
+	main(sys.argv[1:])
+
