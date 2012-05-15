@@ -51,7 +51,7 @@ class GitIndent(IndentPrinter):
 def contains(other_commit, commit):
 	"""Return true of commit is contained in other_commit's DAG."""
 	cmd = ["git", "merge-base", commit, other_commit]
-	p = subprocess.Popen(cmd, stdin=PIPE, stdout=PIPE)
+	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
 	(out, err) = p.communicate()
 	if err: 
 		raise Exception(err)
@@ -59,13 +59,42 @@ def contains(other_commit, commit):
 	lines = out.split("\n")
 	base = lines[0]
 	return base == commit
+
+def unique_commits(commit, others):
+	"""Count the number of commits that are in commit but not in others."""
+	if not others: raise Exception("'others' may not be empty.")
+
+	cmd = ["git", "rev-list", "--count", commit, "--not"]
+	cmd.extend(others)
+	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
+	(out, err) = p.communicate()
+	if err: 
+		raise Exception(err)
+	return int(out.strip())
+
+def order_parents(commits):
+	"""Order git commits such that the one with the most unique commits comes first."""
+	orderable = []
+	for commit in commits:
+		others = commits[:]
+		others.remove(commit)
+		count = unique_commits(commit, others)
+		orderable.append((count, commit))
+
+	orderable.sort(reverse=True) # by unique count, desc
+	# Return just the commits:
+	out = map(lambda tup: tup[1], orderable)
+	return out
+	
+
+	
 		
 def getCommit(commit):
 	cmd = ["git", "log", "-n", "1", "--parents", commit]
-	p = subprocess.Popen(cmd, stdin=PIPE, stdout=PIPE)
+	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
 	(out, err) = p.communicate()
 	if err: 
-		raise err
+		raise Exception(err)
 	return out
 
 # The sortof key/value pattern used in git log:
@@ -114,12 +143,13 @@ class CommitInfo(object):
 		s =       "commit: " + self.commit
 
 		if self.is_merge(): 
-			if self.is_reordered(): s = s + "\nMerge*: "
-			else: s = s + "\nMerge:  "
-			parents = ([self.lhs()] + self.other_parents())
+			s = s + "\nMerge:  "
+			parents = [self.lhs()] + self.other_parents()
 			# use short merge hashes like in Git:
 			parents = map(lambda p: p[0:7], parents) 
 			s = s + " ".join(parents)
+			if self.is_reordered(): s = s + "\nMerge*: " + self.reorder_reason
+				
 
 		s = s + "\nAuthor: " + self.author
 		s = s + "\nDate:   " + self.date
@@ -156,6 +186,10 @@ class CommitInfo(object):
 		self.reorder_reason = None 
 		
 		if not self.has_parent(): return # Nothing to calculate. 
+		if not self.is_merge(): 
+			self.__lhs = self.parents[0]
+			return
+		
 
 		pull_branch = self.is_pull()
 		if pull_branch:
@@ -164,9 +198,13 @@ class CommitInfo(object):
 			self.reorder_reason = "Treating pull of '" + pull_branch + "' as merge into mainline."
 			return
 
-		# Else, default to git-lhs:
-		self.__lhs = self.parents[0]
-		self.__rhs = self.parents[1:]
+		new_parents = order_parents(self.parents)
+		if new_parents != self.parents:
+			self.reorder_reason = "Treating largest branch as mainline."
+		# always do this:
+		self.__lhs = new_parents[0]
+		self.__rhs = new_parents[1:]
+
 			
 
 	__pull_pat = re.compile("[ ]*Merge branch '(.+)' of .* into .*")
