@@ -1,5 +1,26 @@
 #!/usr/bin/python
 
+"""
+This script prints a hierarchical log of git history that is designed to be
+human readable.  It has these characteristics: 
+
+* "Mainline" history goes down the left-hand side
+
+* Following a merge commit, commits which were merged into "mainline" by that
+merge are listed indented and marked with an indentation guide.
+
+* Each commit is listed only once.  Commits will NOT be displayed in right-hand
+side merge if they are also part of the LHS.  
+
+* Pulls are detecetd and displayed as a merge into mainline
+
+* Thus, it's easy to eyeball what got merged into mainline, and when.
+
+Recommended usage: 
+cd yourGitDir
+log | less -S
+"""
+
 import subprocess
 from subprocess import PIPE
 import sys
@@ -60,36 +81,8 @@ def contains(other_commit, commit):
 	base = lines[0]
 	return base == commit
 
-def unique_commits(commit, others):
-	"""Count the number of commits that are in commit but not in others."""
-	if not others: raise Exception("'others' may not be empty.")
-
-	cmd = ["git", "rev-list", "--count", commit, "--not"]
-	cmd.extend(others)
-	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
-	(out, err) = p.communicate()
-	if err: 
-		raise Exception(err)
-	return int(out.strip())
-
-def order_parents(commits):
-	"""Order git commits such that the one with the most unique commits comes first."""
-	orderable = []
-	for commit in commits:
-		others = commits[:]
-		others.remove(commit)
-		count = unique_commits(commit, others)
-		orderable.append((count, commit))
-
-	orderable.sort(reverse=True) # by unique count, desc
-	# Return just the commits:
-	out = map(lambda tup: tup[1], orderable)
-	return out
-	
-
-	
-		
 def getCommit(commit):
+	"""Get a single commit message from git."""
 	cmd = ["git", "log", "-n", "1", "--parents", commit]
 	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
 	(out, err) = p.communicate()
@@ -155,8 +148,6 @@ class CommitInfo(object):
 		s = s + "\nDate:   " + self.date
 		# TODO: Less hacky message indentation:
 		s = s + "\n" + "\n".join(self.message)
-		# if self.reorder_reason:
-		# 	s = s + "\n    (* " + self.reorder_reason + " *)"
 		s = s + "\n"
 		return s
 
@@ -191,24 +182,19 @@ class CommitInfo(object):
 			return
 		
 
-		pull_branch = self.is_pull()
-		if pull_branch:
+		if self.is_pull():
 			self.__lhs = self.parents[1]
 			self.__rhs = self.parents[0:1] #(non-inclusive)
-			self.reorder_reason = "Treating pull of '" + pull_branch + "' as merge into mainline."
+			self.reorder_reason = "Treating pull as merge into mainline."
 			return
 
-		new_parents = order_parents(self.parents)
-		if new_parents != self.parents:
-			self.reorder_reason = "Treating largest branch as mainline."
-		# always do this:
-		self.__lhs = new_parents[0]
-		self.__rhs = new_parents[1:]
+		#TODO: Get rid of __lhs/__rhs
+		self.__lhs = self.parents[0]
+		self.__rhs = self.parents[1:]
 
-			
 
+	# Thankfully, Git marks pulls with messages of this format:
 	__pull_pat = re.compile("[ ]*Merge branch '(.+)' of .* into .*")
-
 	def is_pull(self):
 		"""Try to detect if this was the result of a 'git pull' from the commit message.
 		Returns the name of the upstream branch if we detected a pull.  Else: None.
@@ -219,8 +205,6 @@ class CommitInfo(object):
 			match = self.__pull_pat.match(line)
 			if match: return match.group(1)
 		return None
-		
-
 
 def getCommitInfo(commit):
 	return CommitInfo(getCommit(commit))
