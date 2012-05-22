@@ -69,7 +69,7 @@ class GitIndent(IndentPrinter):
 
 	
 def contains(other_commit, commit):
-	"""Return true of commit is contained in other_commit's DAG."""
+	"""Return true if commit is contained in other_commit's DAG."""
 	cmd = ["git", "merge-base", commit, other_commit]
 	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
 	(out, err) = p.communicate()
@@ -183,18 +183,28 @@ class CommitInfo(object):
 			return
 
 
-	# Thankfully, Git marks pulls with messages of this format:
-	__pull_pat = re.compile("[ ]*Merge branch '(.+)' of .* into .*")
+	# Git changes the default merge commit message depending on the type of merge. 
+	# For details, see fmt_merge_msg_title() in 
+	# https://github.com/git/git/blob/master/builtin/fmt-merge-msg.c
+	# Note: "remote-tracking branch" used to be "remote branch": 
+	# https://github.com/git/git/commit/13931236b9ee2895a98ffdbdacbd0f895956d8a8#L2L103
+	# 'git pull' does 'git fetch' then 'git merge FETCH_HEAD'
+	# Python 2.6 dosn't support non-capturing groups:  :(
+	__pull_pat = re.compile("[ ]*Merge (remote(-tracking)? )?branch '(.+/)?(.+)'( of ([^ ]+))?( into (.*))?")
 	def is_pull(self):
 		"""Try to detect if this was the result of a 'git pull' from the commit message.
-		Returns the name of the upstream branch if we detected a pull.  Else: None.
 		"""
 		# ex:     Merge branch 'upstream' of ssh://url/to/git into myBranch
 		if len(self.parents) != 2: return False
 		for line in self.message:
 			match = self.__pull_pat.match(line)
-			if match: return match.group(1)
-		return None
+			if not match: continue
+			merge_from = match.group(4)
+			# the "into" part is omitted if we're working on master:
+			merge_into = match.group(8) or "master"
+			#Merged an upstream branch w/ same name?  It was a pull.
+			return merge_from == merge_into 
+		return False
 
 def getCommitInfo(commit):
 	return CommitInfo(getCommit(commit))
