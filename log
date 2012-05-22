@@ -46,48 +46,103 @@ class GitIndent(IndentPrinter):
 	"""This indenter remembers the context of the commits which it is outputting. 
 	This allows us to check that we're not displaying duplicate entries inside of indent.
 	"""
-	def __init__(self, level=0, width=4, commits=[], parent=None):
+	def __init__(self, level=0, width=4, parent=None):
 		IndentPrinter.__init__(self, level=level, width=width)
-		self.commits = commits
 		self.parent = parent
+		# Which commit did we use as the LHS?
+		self.lhs_commit = None
+
+		self.__calculated = False
+		self.__commits = []
 		
-	def indent(self):
-		return GitIndent(
+	def indent(self, lhs_commit):
+		inner = GitIndent(
 			level=self.level + 1
 			, width=self.width
 			, parent=self
 		)
+		inner.lhs_commit = lhs_commit
+		return inner
 
 	def is_in_lhs(self, commit):
 		"""Return true if this commit will be in some other part of the left-hand-side.
 		"""
-		for other_commit in self.commits:
-			if contains(other_commit, commit): return True
-
+		if self.lhs_commit and not self.__calculated: 
+			self.__commits = get_commit_set(self.lhs_commit)
+			self.__calculated = True
+		if commit in self.__commits: return True
 		if self.parent: return self.parent.is_in_lhs(commit)
 		else: return False
 
-	
-def contains(other_commit, commit):
-	"""Return true if commit is contained in other_commit's DAG."""
-	cmd = ["git", "merge-base", commit, other_commit]
-	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
-	(out, err) = p.communicate()
-	if err: 
-		raise Exception(err)
 
-	lines = out.split("\n")
-	base = lines[0]
-	return base == commit
-
-def getCommit(commit):
-	"""Get a single commit message from git."""
-	cmd = ["git", "log", "-n", "1", "--parents", commit]
+def get_output(*cmd):
+	"""Run a command and return its output."""	
 	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
 	(out, err) = p.communicate()
 	if err: 
 		raise Exception(err)
 	return out
+
+# The Directed Acyclic Graph of Git history by commit ID: 
+__dag = {}
+def read_dag(commit):
+	"""Read the DAG from Git into memory."""
+	out = get_output("git", "rev-list", "--parents", commit)
+	lines = out.split("\n")
+	for line in lines: 
+		commits = line.split(" ")
+		commit = commits[0]
+		parents = commits[1:]
+		__dag[commit] = parents
+	
+def get_commit_set(commit):
+	"""Return a set that contains all parents of the given commit. (inclusive)"""
+	if not __dag.has_key(commit): read_dag(commit)
+
+	to_search = [commit]
+	result = set()
+
+	while to_search:
+		commit = to_search.pop()
+		if commit in result: continue # Some other merge already got this history
+		result.add(commit)
+		parents = __dag[commit]
+		to_search.extend(parents)
+
+	return result
+	
+
+
+# TODO: Make this a cache:
+__commits = {}
+def lookup_commit(commit):
+	"""Get a cached CommitInfo.  Otherwise look up a batch of them to save on calls to git."""
+	if __commits.has_key(commit): return __commits[commit]
+	else: return fetch_commits(commit)
+
+def fetch_commits(commit, fetch=1000):
+	out = get_output("git", "log", "-n", str(fetch), "--parents", commit)
+	lines = out.split("\n")
+	log_lines = []
+	infos = []
+	for line in lines:
+		if line.startswith("commit ") and log_lines:	
+			#Add the previous commit to the cache: 
+			infos.append(CommitInfo(log_lines))
+			log_lines = []
+		log_lines.append(line)
+	# Catch the last commit:
+	if log_lines:
+		infos.append(CommitInfo(log_lines))
+
+	# Add them to the cache:
+	for info in infos: __commits[info.commit] = info
+	# Return the first one.  The name we used to look it up 
+	# Might not match its commit.  (Ex: HEAD) 
+	return infos[0]
+			
+			
+	
 
 # The sortof key/value pattern used in git log:
 __kv_pat = re.compile("^([^: ]+):?[ ]+(.*)$")
@@ -103,8 +158,12 @@ def remove_message_padding(line):
 	return line[4:]
 
 class CommitInfo(object):
-	def __init__(self, commit_text):
-		lines = commit_text.split("\n")
+	@staticmethod
+	def from_commit(commit):
+		#return CommitInfo(getCommit(commit))
+		return lookup_commit(commit)
+
+	def __init__(self, lines):
 		data = {}
 		count = 0
 		for line in lines:	
@@ -206,8 +265,6 @@ class CommitInfo(object):
 			return merge_from == merge_into 
 		return False
 
-def getCommitInfo(commit):
-	return CommitInfo(getCommit(commit))
 	
 def logHistory(commit, printer=GitIndent()):
 	while commit:
@@ -215,10 +272,9 @@ def logHistory(commit, printer=GitIndent()):
 		# history, stop printing:
 		if printer.is_in_lhs(commit): break 
 
-		info = getCommitInfo(commit)
+		info = CommitInfo.from_commit(commit)
 		printer.println(info)
-		indent = printer.indent()
-		indent.commits = [info.lhs()]
+		indent = printer.indent(lhs_commit=info.lhs())
 		for parent in info.rhs():
 			# Don't display duplicate data:
 			if indent.is_in_lhs(parent): continue
