@@ -1,0 +1,20 @@
+Gitlogger shows git history in a way that is more easily readable than `git
+log`. It does this by showing merges as indented commits which are merged into
+an unindented "mainline" (or left-hand-side) history.  It also attempts to
+detect which merges were the result of a 'git pull', and treats those merges as
+a merge into mainline.  This makes it easy to see when a developer's local
+changes were merged into mainline and pushed.  
+
+For samples of history via 'git log', 'git log --graph', and gitlogger, see the
+samples/ directory. It contains logs taken from a sample repository in which
+users Bob and Jill have pushed/pulled their changes to/from a central repo
+
+Usage: 
+cd YourGitDir
+log [git-rev] | less
+
+
+TODO: 
+ * Automatically pipe through 'less'?
+ * Wrap long commit lines.  (Use less -S for better formatting for now) 
+ * Performance improvements?  (Faster way to do `git merge-base` in Python?)
