@@ -15,6 +15,5 @@ log [git-rev] | less
 
 
 TODO: 
- * Automatically pipe through 'less'?
  * Wrap long commit lines.  (Use less -S for better formatting for now) 
  * Performance improvements?  (Faster way to do `git merge-base` in Python?)
