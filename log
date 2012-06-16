@@ -195,12 +195,15 @@ class CommitInfo(object):
 	def __str__(self):
 		s =       "commit: " + self.commit
 
-		if self.is_merge(): 
-			s = s + "\nMerge:  "
-			# use short merge hashes like in Git:
-			parents = map(lambda p: p[0:7], self.parents) 
-			s = s + " ".join(parents)
-			if self.is_reordered(): s = s + "\nMerge*: " + self.reorder_reason
+		if self.is_merge():
+			if options.merges: 
+				s = s + "\nMerge:  "
+				# use short merge hashes like in Git:
+				parents = map(lambda p: p[0:7], self.parents) 
+				s = s + " ".join(parents) + "\n"
+			
+			if self.is_reordered() and options.reasons: 
+				s = s + "Merge*: " + self.reorder_reason
 				
 
 		s = s + "\nAuthor: " + self.author
@@ -282,13 +285,85 @@ def logHistory(commit, printer=GitIndent()):
 		# Continue logging LHS:
 		commit = info.lhs()
 
-def main(args):
-	if args:
-		commit = args[0]
-	else:
-		commit = "HEAD"
-	logHistory(commit)
+# Use Optparse for 2.6 compatibility:
+import optparse
+parser = optparse.OptionParser()
+parser.add_option("-m", "--merges", action="store_true", dest="merges", default=False
+	, help="Show the Merge: ... line with parent IDs for merge commits."
+)
+parser.add_option("-r", "--reasons", action="store_true", dest="reasons", default=False
+	, help="Show an added Merge*: line with the reason why parents were reordered."
+)
+parser.add_option("-w", "--width", dest="width", default=None
+	, help="Set the column width to wrap the output."
+)
+
+(options, args) = parser.parse_args()
+
+
+def main():
+	with redirect_output():
+		if args:
+			commit = args[0]
+		else:
+			commit = "HEAD"
+		logHistory(commit)
+
+def redirect_output():
+	if not options.width:
+		options.width = detect_width()
+	if not sys.stdout.isatty():
+		# Nothing to do:
+		return FakeRedirector()
+	# Otherwise, pipe our output to 'less':
+	# -S Don't wrap.  (We'll do it better.) 
+	# -F Exit immediately if no scrolling necessary
+	# -X Fix -F on OSX.
+	return OutputRedirector(["less", "-S", "-F", "-X"])
+	
+class FakeRedirector:
+	def __enter__(self):
+		pass
+	def __exit__(self, type, value, traceback):
+		pass
+
+class OutputRedirector(FakeRedirector):
+	def __init__(self, cmd):
+		self._stdout = sys.stdout
+		self._stderr = sys.stderr
+		p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+		sys.stdout = p.stdin
+		sys.stderr = p.stdin
+		self.proc = p
+
+	def __exit__(self, type, value, traceback):
+		# Restore stdout/stderr: 
+		sys.stdout = self._stdout
+		sys.stderr = self._stderr
+		p = self.proc
+		p.stdin.close() # let proc know we're done writing.
+		p.wait() # for the user to finish using proc.
+
+		# Suppress "Broken Pipe" error:
+		# Likely just means that the user quit less:
+		if type is IOError and value.errno == 32:
+			return True
+		
+
+def detect_width(default=80):
+	# First try *nix detection.  Nabbed from console.py:
+	try:
+		import fcntl # will fail on non-*nix
+		import array
+		import termios
+		terminfo = fcntl.ioctl(sys.stderr, termios.TIOCGWINSZ, "\0" * 8)
+		width =  array.array("h", terminfo)[1]
+		return width
+	except:
+		# Fallback to the "default" size
+		return default 
+
 
 if __name__ == "__main__":
-	main(sys.argv[1:])
+	main()
 
