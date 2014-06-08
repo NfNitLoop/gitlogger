@@ -121,7 +121,7 @@ def lookup_commit(commit):
 	else: return fetch_commits(commit)
 
 def fetch_commits(commit, fetch=1000):
-	out = get_output("git", "log", "-n", str(fetch), "--parents", commit)
+	out = get_output("git", "log", "-n", str(fetch), "--parents", "--no-decorate", commit)
 	lines = out.split("\n")
 	log_lines = []
 	infos = []
@@ -195,15 +195,15 @@ class CommitInfo(object):
 	def __str__(self):
 		s =       "commit: " + self.commit
 
-		if self.is_merge():
+		if self.is_merge:
 			if options.merges: 
 				s = s + "\nMerge:  "
 				# use short merge hashes like in Git:
 				parents = map(lambda p: p[0:7], self.parents) 
-				s = s + " ".join(parents) + "\n"
+				s = s + " ".join(parents)
 			
-			if self.is_reordered() and options.reasons: 
-				s = s + "Merge*: " + self.reorder_reason
+			if self.is_reordered and options.reasons:
+				s = s + "\nMerge*: " + self.reorder_reason
 				
 
 		s = s + "\nAuthor: " + self.author
@@ -213,19 +213,23 @@ class CommitInfo(object):
 		s = s + "\n"
 		return s
 
+	@property
 	def is_merge(self): return len(self.parents) > 1
+
+	@property
 	def has_parent(self): return len(self.parents) > 0
 
+	@property
 	def is_reordered(self):
 		"""Return true iff lhs/rhs reordering has taken place."""
-		if not self.is_merge(): return False
+		if not self.is_merge: return False
 		return self.parents != self.orig_parents
 
 	def lhs(self):
 		"""Get the "left-hand-side" of a merge.
 		Unlike in Git, this is not specified by the order of the parents, but is 
 		calculated in a way to make history most readable."""
-		if not self.has_parent(): return None
+		if not self.has_parent: return None
 		else: return self.parents[0]
 
 	def rhs(self):
@@ -236,9 +240,9 @@ class CommitInfo(object):
 		# Defaults:
 		self.reorder_reason = None 
 		
-		if not self.is_merge(): return # Nothing to do
+		if not self.is_merge: return # Nothing to do
 		
-		if self.is_pull():
+		if self.is_pull:
 			# A pull is always two commits.  Switch which one is on left:
 			self.reorder_reason = "Treating pull as merge into mainline."
 			self.parents.reverse()
@@ -253,6 +257,8 @@ class CommitInfo(object):
 	# 'git pull' does 'git fetch' then 'git merge FETCH_HEAD'
 	# Python 2.6 dosn't support non-capturing groups:  :(
 	__pull_pat = re.compile("[ ]*Merge (remote(-tracking)? )?branch '(.+/)?(.+)'( of ([^ ]+))?( into (.*))?")
+
+	@property
 	def is_pull(self):
 		"""Try to detect if this was the result of a 'git pull' from the commit message.
 		"""
@@ -366,4 +372,3 @@ def detect_width(default=80):
 
 if __name__ == "__main__":
 	main()
-
