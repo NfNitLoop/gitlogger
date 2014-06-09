@@ -55,9 +55,13 @@ class GitIndent(IndentPrinter):
 		self.__calculated = False
 		self.__commits = []
 		
-	def indent(self, lhs_commit):
+	def indent(self, lhs_commit, level=None):
+		# Defualt to one more level of indentation, unless overridden:
+		if not level:
+			level = self.level + 1
+			
 		inner = GitIndent(
-			level=self.level + 1
+			level=level
 			, width=self.width
 			, parent=self
 		)
@@ -212,6 +216,14 @@ class CommitInfo(object):
 		s = s + "\n" + "\n".join(self.message)
 		s = s + "\n"
 		return s
+		
+	@property
+	def commit_line(self):
+		"""A commit: line that contains the commit and its parents hashes."""
+		hashes = [self.commit[0:16]]
+		hashes.extend([p[0:8] for p in self.parents])
+		return "commit: " + " ".join(hashes)
+
 
 	@property
 	def is_merge(self): return len(self.parents) > 1
@@ -282,12 +294,21 @@ def logHistory(commit, printer=GitIndent()):
 		if printer.is_in_lhs(commit): break 
 
 		info = CommitInfo.from_commit(commit)
-		printer.println(info)
-		indent = printer.indent(lhs_commit=info.lhs())
+		if info.is_merge and printer.level >= options.max_depth:
+			# Print truncated merge info:
+			printer.println("(Skipping merge " + info.commit_line + ")")
+			# Don't indent further:
+			inner_printer = printer.indent(lhs_commit=info.lhs(), level=printer.level)
+		else:
+			# Print full info & indent children:
+			printer.println(info)
+			inner_printer = printer.indent(lhs_commit=info.lhs())
+		
 		for parent in info.rhs():
-			# Don't display duplicate data:
-			if indent.is_in_lhs(parent): continue
-			logHistory(parent, indent)
+			if inner_printer.is_in_lhs(parent): 
+				# Don't display duplicate data:
+				continue
+			logHistory(parent, inner_printer)
 		# Continue logging LHS:
 		commit = info.lhs()
 
@@ -302,6 +323,9 @@ parser.add_option("-r", "--reasons", action="store_true", dest="reasons", defaul
 )
 parser.add_option("-w", "--width", dest="width", default=None
 	, help="Set the column width to wrap the output."
+)
+parser.add_option("-x", "--max-depth", dest="max_depth", default=4
+    , help="Maximum indentation depth."
 )
 
 (options, args) = parser.parse_args()
