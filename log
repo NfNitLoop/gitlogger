@@ -50,13 +50,13 @@ class GitIndent(IndentPrinter):
 	def __init__(self, level=0, width=4, parent=None):
 		IndentPrinter.__init__(self, level=level, width=width)
 		self.parent = parent
-		# Which commit did we use as the LHS?
-		self.lhs_commit = None
+		# Which commits should we print in this indentation level?
+		self.limit_commits = None
 
 		self.__calculated = False
 		self.__commits = []
 		
-	def indent(self, lhs_commit, level=None):
+	def indent(self, limit_commits, level=None):
 		# Defualt to one more level of indentation, unless overridden:
 		if not level:
 			level = self.level + 1
@@ -66,31 +66,22 @@ class GitIndent(IndentPrinter):
 			, width=self.width
 			, parent=self
 		)
-		inner.lhs_commit = lhs_commit
+		
+		# If our parent is already limited, we're limited to a subset of those:
+		if self.parent is not None and self.parent.limit_commits is not None: 
+			limit_commits = limit_commits.intersection(self.parent.limit_commits)
+		
+		inner.limit_commits = limit_commits
 		return inner
-
-	def is_in_lhs(self, commit):
-		"""Return true if this commit will be in some other part of the left-hand-side."""
-		return contains(commit, *self.lhs_commits)
 		
-	@property
-	def lhs_commits(self):
-		"""Returns a tuple (immutable) of commits on the lhs or its LHSs."""
-		if not self.lhs_commit: return ()
-		if not self.parent: return ()
-		
-		return self.parent.lhs_commits + (self.lhs_commit,)
+	def should_print(self, commit):
+		if self.limit_commits is None:
+			# not set, we're the LHS, print everything.
+			return True
+		else: return commit in self.limit_commits
 		
 		
 		
-	def _old_is_in_lhs(self, commit):
-		"""Return true if this commit will be in some other part of the left-hand-side."""
-		if self.lhs_commit and not self.__calculated: 
-			self.__commits = get_commit_set(self.lhs_commit)
-			self.__calculated = True
-		if commit in self.__commits: return True
-		if self.parent: return self.parent.is_in_lhs(commit)
-		else: return False
 		
 def contains(commit, *other_commits):
 	"""Return true iff commit is included in the history of any of other_commits."""
@@ -167,7 +158,14 @@ def get_commit_set(commit):
 
 	return result
 	
-
+def git_unique_commits(commit, others):
+	"""Return a set of commits found in the history of commit, but not others."""
+	if len(others) < 1:
+		raise Exception("Others can't be empty. At least not if you want a small set of commits.")
+	cmd = ["git", "log", "--pretty=format:%H", commit, "--not"]
+	cmd.extend(others)
+	return set(get_output(*cmd).split("\n"))
+	
 
 # TODO: Make this a cache:
 __commits = {}
@@ -312,6 +310,20 @@ class CommitInfo(object):
 			self.parents.reverse()
 			return
 
+	def unique_commits(self, parent):
+		"""Given parent, which is one of the parents of this commit, return a list
+		of commit IDs (including parent) which are found in the history of parent
+		but not any of the other parents."""
+		
+		
+		parents = set(self.parents)
+		if parent not in parents:
+			raise Exception("Parent {} not a parent of {}!".format(parent, self.commit))
+			
+		
+		parents.remove(parent)
+		
+		return git_unique_commits(parent, parents)
 
 	# Git changes the default merge commit message depending on the type of merge. 
 	# For details, see fmt_merge_msg_title() in 
@@ -343,23 +355,22 @@ def logHistory(commit, printer=GitIndent()):
 	while commit:
 		# If we've reached a point that's already contained in LHS
 		# history, stop printing:
-		if printer.is_in_lhs(commit): break 
+		if not printer.should_print(commit): break 
 
 		info = CommitInfo.from_commit(commit)
 		if info.is_merge and printer.level >= options.max_depth:
 			# Print truncated merge info:
 			printer.println("(Skipping merge " + info.commit_line + ")")
 			# Don't indent further:
-			inner_printer = printer.indent(lhs_commit=info.lhs(), level=printer.level)
+			level = printer.level
 		else:
 			# Print full info & indent children:
 			printer.println(info)
-			inner_printer = printer.indent(lhs_commit=info.lhs())
-		
+			# allow autoindent:
+			level = None
+			
 		for parent in info.rhs():
-			if inner_printer.is_in_lhs(parent): 
-				# Don't display duplicate data:
-				continue
+			inner_printer = printer.indent(limit_commits=info.unique_commits(parent), level=level)
 			logHistory(parent, inner_printer)
 		# Continue logging LHS:
 		commit = info.lhs()
