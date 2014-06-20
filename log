@@ -38,6 +38,7 @@ class IndentPrinter(object):
 	def println(self, lines):
 		for line in str(lines).split("\n"):
 			print(self.prefix + line)
+		sys.stdout.flush()
 
 	def indent(self):
 		return IndentPrinter(level=self.level + 1, width=self.width)
@@ -69,14 +70,65 @@ class GitIndent(IndentPrinter):
 		return inner
 
 	def is_in_lhs(self, commit):
-		"""Return true if this commit will be in some other part of the left-hand-side.
-		"""
+		"""Return true if this commit will be in some other part of the left-hand-side."""
+		return contains(commit, *self.lhs_commits)
+		
+	@property
+	def lhs_commits(self):
+		"""Returns a tuple (immutable) of commits on the lhs or its LHSs."""
+		if not self.lhs_commit: return ()
+		if not self.parent: return ()
+		
+		return self.parent.lhs_commits + (self.lhs_commit,)
+		
+		
+		
+	def _old_is_in_lhs(self, commit):
+		"""Return true if this commit will be in some other part of the left-hand-side."""
 		if self.lhs_commit and not self.__calculated: 
 			self.__commits = get_commit_set(self.lhs_commit)
 			self.__calculated = True
 		if commit in self.__commits: return True
 		if self.parent: return self.parent.is_in_lhs(commit)
 		else: return False
+		
+def contains(commit, *other_commits):
+	"""Return true iff commit is included in the history of any of other_commits."""
+	
+	if len(other_commits) == 0: return False
+	
+	cmd = ["git", "merge-base", "--independent", commit]
+	cmd.extend(other_commits)
+	#print repr(cmd)
+	
+	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
+	(out, err) = p.communicate()
+	if err:
+		raise Exception(err)
+	lines = out.split("\n")
+	
+	# commit is included in other_commits if it is not independent:
+	#print repr(lines)
+	return commit not in lines
+	
+	
+
+def memoizer():
+	"""Create a memorizer decorator that has its own cache."""
+	cache = {}
+	
+	def decorator(inner_fn):
+		def new_fn(*args, **kwargs):
+			key = (args, kwargs)
+			if cache.has_key(key): return cache[key]
+			# else:
+			value = inner_fn(*args, **kwargs)
+			cache[key] = value
+			return value
+			
+		return new_fn
+		
+	return decorator
 
 
 def get_output(*cmd):
