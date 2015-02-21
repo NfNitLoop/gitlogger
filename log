@@ -26,102 +26,6 @@ from subprocess import PIPE
 import sys
 import re
 
-class IndentPrinter(object):
-	"""Utility to print lines at a given indent level."""
-	def __init__(self, level=0, width=4):
-		self.level = level
-		self.width = width
-		prefix = "|" + " " * (width - 1)
-		prefix = prefix * level
-		self.prefix = prefix
-
-	def println(self, lines):
-		for line in str(lines).split("\n"):
-			print(self.prefix + line)
-		sys.stdout.flush()
-
-	def indent(self):
-		return IndentPrinter(level=self.level + 1, width=self.width)
-		
-class GitIndent(IndentPrinter):
-	"""This indenter remembers the context of the commits which it is outputting. 
-	This allows us to check that we're not displaying duplicate entries inside of indent.
-	"""
-	def __init__(self, level=0, width=4, parent=None):
-		IndentPrinter.__init__(self, level=level, width=width)
-		self.parent = parent
-		# Which commits should we print in this indentation level?
-		self.limit_commits = None
-
-		self.__calculated = False
-		self.__commits = []
-		
-	def indent(self, limit_commits, level=None):
-		# Defualt to one more level of indentation, unless overridden:
-		if not level:
-			level = self.level + 1
-			
-		inner = GitIndent(
-			level=level
-			, width=self.width
-			, parent=self
-		)
-		
-		# If our parent is already limited, we're limited to a subset of those:
-		if self.parent is not None and self.parent.limit_commits is not None: 
-			limit_commits = limit_commits.intersection(self.parent.limit_commits)
-		
-		inner.limit_commits = limit_commits
-		return inner
-		
-	def should_print(self, commit):
-		if self.limit_commits is None:
-			# not set, we're the LHS, print everything.
-			return True
-		else: return commit in self.limit_commits
-		
-		
-		
-		
-def contains(commit, *other_commits):
-	"""Return true iff commit is included in the history of any of other_commits."""
-	
-	if len(other_commits) == 0: return False
-	
-	cmd = ["git", "merge-base", "--independent", commit]
-	cmd.extend(other_commits)
-	#print repr(cmd)
-	
-	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
-	(out, err) = p.communicate()
-	if err:
-		raise Exception(err)
-	lines = out.split("\n")
-	
-	# commit is included in other_commits if it is not independent:
-	#print repr(lines)
-	return commit not in lines
-	
-	
-
-def memoizer():
-	"""Create a memorizer decorator that has its own cache."""
-	cache = {}
-	
-	def decorator(inner_fn):
-		def new_fn(*args, **kwargs):
-			key = (args, kwargs)
-			if cache.has_key(key): return cache[key]
-			# else:
-			value = inner_fn(*args, **kwargs)
-			cache[key] = value
-			return value
-			
-		return new_fn
-		
-	return decorator
-
-
 def get_output(*cmd):
 	"""Run a command and return its output."""	
 	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
@@ -130,34 +34,6 @@ def get_output(*cmd):
 		raise Exception(err)
 	return out
 
-# The Directed Acyclic Graph of Git history by commit ID: 
-__dag = {}
-def read_dag(commit):
-	"""Read the DAG from Git into memory."""
-	out = get_output("git", "rev-list", "--parents", commit)
-	lines = out.split("\n")
-	for line in lines: 
-		commits = line.split(" ")
-		commit = commits[0]
-		parents = commits[1:]
-		__dag[commit] = parents
-	
-def get_commit_set(commit):
-	"""Return a set that contains all parents of the given commit. (inclusive)"""
-	if not __dag.has_key(commit): read_dag(commit)
-
-	to_search = [commit]
-	result = set()
-
-	while to_search:
-		commit = to_search.pop()
-		if commit in result: continue # Some other merge already got this history
-		result.add(commit)
-		parents = __dag[commit]
-		to_search.extend(parents)
-
-	return result
-	
 def git_unique_commits(commit, others):
 	"""Return a set of commits found in the history of commit, but not others."""
 	if len(others) < 1:
@@ -325,6 +201,14 @@ class CommitInfo(object):
 		
 		return git_unique_commits(parent, parents)
 
+	def walk_lhs(self):
+		"""Generate CommitInfo objects down the lhs of the history, starting with self."""
+		info = self
+		while info: 
+			yield info
+			parent = info.lhs()
+			info = CommitInfo.from_commit(parent)
+
 	# Git changes the default merge commit message depending on the type of merge. 
 	# For details, see fmt_merge_msg_title() in 
 	# https://github.com/git/git/blob/master/builtin/fmt-merge-msg.c
@@ -351,29 +235,58 @@ class CommitInfo(object):
 		return False
 
 	
-def logHistory(commit, printer=GitIndent()):
-	while commit:
-		# If we've reached a point that's already contained in LHS
-		# history, stop printing:
-		if not printer.should_print(commit): break 
+def logHistory(start_commit, excludes=None, level=0, max_depth=5):
+	"""
+	Log history down the left-hand side. Recursively log inner parts. 
 
-		info = CommitInfo.from_commit(commit)
-		if info.is_merge and printer.level >= options.max_depth:
+	commit -- the commit at which to start logging.
+	excludes -- a sequence of commit IDs whose history should be EXCLUDED when 
+		deciding what to show in merge history.
+	level -- The level of indentation we're currently at. 
+	"""
+
+
+	if level > max_depth: level = max_depth
+
+	excludes = excludes or set()
+	includes = None
+	if excludes: 
+		includes = git_unique_commits(start_commit, excludes)
+
+	def should_print(commit):
+		return (not excludes) or (commit in includes)
+		
+	info = CommitInfo.from_commit(start_commit)	
+
+	for info in info.walk_lhs():
+		if not should_print(info.commit): 
+			# We've reached some history that's been excluded.
+			break 
+
+		if info.is_merge and level >= max_depth:
 			# Print truncated merge info:
-			printer.println("(Skipping merge " + info.commit_line + ")")
-			# Don't indent further:
-			level = printer.level
+			print_indented("(Skipping merge " + info.commit_line + ")", level=level)
 		else:
 			# Print full info & indent children:
-			printer.println(info)
-			# allow autoindent:
-			level = None
+			print_indented(info, level=level)
 			
 		for parent in info.rhs():
-			inner_printer = printer.indent(limit_commits=info.unique_commits(parent), level=level)
-			logHistory(parent, inner_printer)
-		# Continue logging LHS:
-		commit = info.lhs()
+			new_excludes = set(info.parents)
+			new_excludes.remove(parent)
+			new_excludes.update(excludes)
+			
+			logHistory(parent, excludes=new_excludes, level=(level + 1), max_depth=max_depth)
+
+def print_indented(msg, level=0, left="|   "):
+	prefix = left * level
+
+	if type(msg) is list:
+		lines = msg
+	else:
+		lines = str(msg).split("\n")
+
+	for line in lines:
+		print prefix + line
 
 # Use Optparse for 2.6 compatibility:
 import optparse
