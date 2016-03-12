@@ -83,44 +83,7 @@ class GitIndent(IndentPrinter):
 		
 		
 		
-def contains(commit, *other_commits):
-	"""Return true iff commit is included in the history of any of other_commits."""
 	
-	if len(other_commits) == 0: return False
-	
-	cmd = ["git", "merge-base", "--independent", commit]
-	cmd.extend(other_commits)
-	#print repr(cmd)
-	
-	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
-	(out, err) = p.communicate()
-	if err:
-		raise Exception(err)
-	lines = out.split("\n")
-	
-	# commit is included in other_commits if it is not independent:
-	#print repr(lines)
-	return commit not in lines
-	
-	
-
-def memoizer():
-	"""Create a memorizer decorator that has its own cache."""
-	cache = {}
-	
-	def decorator(inner_fn):
-		def new_fn(*args, **kwargs):
-			key = (args, kwargs)
-			if cache.has_key(key): return cache[key]
-			# else:
-			value = inner_fn(*args, **kwargs)
-			cache[key] = value
-			return value
-			
-		return new_fn
-		
-	return decorator
-
 
 def get_output(*cmd):
 	"""Run a command and return its output."""	
@@ -130,33 +93,6 @@ def get_output(*cmd):
 		raise Exception(err)
 	return out
 
-# The Directed Acyclic Graph of Git history by commit ID: 
-__dag = {}
-def read_dag(commit):
-	"""Read the DAG from Git into memory."""
-	out = get_output("git", "rev-list", "--parents", commit)
-	lines = out.split("\n")
-	for line in lines: 
-		commits = line.split(" ")
-		commit = commits[0]
-		parents = commits[1:]
-		__dag[commit] = parents
-	
-def get_commit_set(commit):
-	"""Return a set that contains all parents of the given commit. (inclusive)"""
-	if not __dag.has_key(commit): read_dag(commit)
-
-	to_search = [commit]
-	result = set()
-
-	while to_search:
-		commit = to_search.pop()
-		if commit in result: continue # Some other merge already got this history
-		result.add(commit)
-		parents = __dag[commit]
-		to_search.extend(parents)
-
-	return result
 	
 def git_unique_commits(commit, others):
 	"""Return a set of commits found in the history of commit, but not others."""
@@ -395,14 +331,16 @@ parser.add_option("-x", "--max-depth", dest="max_depth", default=4
 
 
 def main():
-	with redirect_output():
+	with pipe_through_less():
 		if args:
 			commit = args[0]
 		else:
 			commit = "HEAD"
 		logHistory(commit)
 
-def redirect_output():
+def pipe_through_less():
+	"""Iff the output is an interactive terminal, automatically pipe through `less`."""
+	# TODO: Don't rely on module-globals. Gross.
 	if not options.width:
 		options.width = detect_width()
 	if not sys.stdout.isatty():
