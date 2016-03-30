@@ -299,7 +299,7 @@ def pipe_through_less():
     # TODO: Don't rely on module-globals. Gross.
     if not options.width:
         options.width = detect_width()
-    if not sys.stdout.isatty() or True: #TODO: Fix for Python3.
+    if not sys.stdout.isatty():
         # Nothing to do:
         return FakeRedirector()
     # Otherwise, pipe our output to 'less':
@@ -318,7 +318,7 @@ class OutputRedirector(FakeRedirector):
     def __init__(self, cmd):
         self._stdout = sys.stdout
         self._stderr = sys.stderr
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, universal_newlines=True)
         sys.stdout = p.stdin
         sys.stderr = p.stdin
         self.proc = p
@@ -328,12 +328,15 @@ class OutputRedirector(FakeRedirector):
         sys.stdout = self._stdout
         sys.stderr = self._stderr
         p = self.proc
-        p.stdin.close() # let proc know we're done writing.
+        try:
+            p.stdin.close() # let proc know we're done writing.
+        except BrokenPipeError:
+            pass
         p.wait() # for the user to finish using proc.
 
         # Suppress "Broken Pipe" error:
         # Likely just means that the user quit less:
-        if type is IOError and value.errno == 32:
+        if type is BrokenPipeError:
             return True
         
 
