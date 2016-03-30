@@ -31,12 +31,12 @@ from collections import OrderedDict
 
 
 def main():
-	with pipe_through_less():
-		if args:
-			commit = args[0]
-		else:
-			commit = "HEAD"
-		logHistory(commit)
+    with pipe_through_less():
+        if args:
+            commit = args[0]
+        else:
+            commit = "HEAD"
+        logHistory(commit)
 
 class Repo:
     def __init__(self, path, git_exe="git"):
@@ -172,22 +172,22 @@ class CommitInfo:
         return "\n".join(lines)
 
 class IndentPrinter(object):
-	"""Utility to print lines at a given indent level."""
-	def __init__(self, level=0, width=4):
-		self.level = level
-		self.width = width
-		prefix = "|" + " " * (width - 1)
-		prefix = prefix * level
-		self.prefix = prefix
+    """Utility to print lines at a given indent level."""
+    def __init__(self, level=0, width=4):
+        self.level = level
+        self.width = width
+        prefix = "|" + " " * (width - 1)
+        prefix = prefix * level
+        self.prefix = prefix
 
-	def print(self, text):
-		for line in str(text).split("\n"):
-			print(self.prefix + line)
-		# TODO 
-		sys.stdout.flush()
+    def print(self, text):
+        for line in str(text).split("\n"):
+            print(self.prefix + line)
+        # TODO 
+        sys.stdout.flush()
 
-	def indent(self):
-		return IndentPrinter(level=self.level + 1, width=self.width)
+    def indent(self):
+        return IndentPrinter(level=self.level + 1, width=self.width)
 
 def logHistory(commit_id, printer=IndentPrinter(), excludes=None, repo=None):
     if excludes is None:
@@ -278,13 +278,13 @@ class Iterator:
 import optparse
 parser = optparse.OptionParser()
 parser.add_option("-m", "--merges", action="store_true", dest="merges", default=False
-	, help="Show the Merge: ... line with parent IDs for merge commits."
+    , help="Show the Merge: ... line with parent IDs for merge commits."
 )
 parser.add_option("-r", "--reasons", action="store_true", dest="reasons", default=False
-	, help="Show an added Merge*: line with the reason why parents were reordered."
+    , help="Show an added Merge*: line with the reason why parents were reordered."
 )
 parser.add_option("-w", "--width", dest="width", default=None
-	, help="Set the column width to wrap the output."
+    , help="Set the column width to wrap the output."
 )
 parser.add_option("-x", "--max-depth", dest="max_depth", default=4
     , help="Maximum indentation depth."
@@ -295,61 +295,61 @@ parser.add_option("-x", "--max-depth", dest="max_depth", default=4
 
 
 def pipe_through_less():
-	"""Iff the output is an interactive terminal, automatically pipe through `less`."""
-	# TODO: Don't rely on module-globals. Gross.
-	if not options.width:
-		options.width = detect_width()
-	if not sys.stdout.isatty() or True: #TODO: Fix for Python3.
-		# Nothing to do:
-		return FakeRedirector()
-	# Otherwise, pipe our output to 'less':
-	# -S Don't wrap.  (We'll do it better.) 
-	# -F Exit immediately if no scrolling necessary
-	# -X Fix -F on OSX.
-	return OutputRedirector(["less", "-S", "-F", "-X"])
-	
+    """Iff the output is an interactive terminal, automatically pipe through `less`."""
+    # TODO: Don't rely on module-globals. Gross.
+    if not options.width:
+        options.width = detect_width()
+    if not sys.stdout.isatty() or True: #TODO: Fix for Python3.
+        # Nothing to do:
+        return FakeRedirector()
+    # Otherwise, pipe our output to 'less':
+    # -S Don't wrap.  (We'll do it better.) 
+    # -F Exit immediately if no scrolling necessary
+    # -X Fix -F on OSX.
+    return OutputRedirector(["less", "-S", "-F", "-X"])
+    
 class FakeRedirector:
-	def __enter__(self):
-		pass
-	def __exit__(self, type, value, traceback):
-		pass
+    def __enter__(self):
+        pass
+    def __exit__(self, type, value, traceback):
+        pass
 
 class OutputRedirector(FakeRedirector):
-	def __init__(self, cmd):
-		self._stdout = sys.stdout
-		self._stderr = sys.stderr
-		p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-		sys.stdout = p.stdin
-		sys.stderr = p.stdin
-		self.proc = p
+    def __init__(self, cmd):
+        self._stdout = sys.stdout
+        self._stderr = sys.stderr
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        sys.stdout = p.stdin
+        sys.stderr = p.stdin
+        self.proc = p
 
-	def __exit__(self, type, value, traceback):
-		# Restore stdout/stderr: 
-		sys.stdout = self._stdout
-		sys.stderr = self._stderr
-		p = self.proc
-		p.stdin.close() # let proc know we're done writing.
-		p.wait() # for the user to finish using proc.
+    def __exit__(self, type, value, traceback):
+        # Restore stdout/stderr: 
+        sys.stdout = self._stdout
+        sys.stderr = self._stderr
+        p = self.proc
+        p.stdin.close() # let proc know we're done writing.
+        p.wait() # for the user to finish using proc.
 
-		# Suppress "Broken Pipe" error:
-		# Likely just means that the user quit less:
-		if type is IOError and value.errno == 32:
-			return True
-		
+        # Suppress "Broken Pipe" error:
+        # Likely just means that the user quit less:
+        if type is IOError and value.errno == 32:
+            return True
+        
 
 def detect_width(default=80):
-	# First try *nix detection.  Nabbed from console.py:
-	try:
-		import fcntl # will fail on non-*nix
-		import array
-		import termios
-		terminfo = fcntl.ioctl(sys.stderr, termios.TIOCGWINSZ, "\0" * 8)
-		width =  array.array("h", terminfo)[1]
-		return width
-	except:
-		# Fallback to the "default" size
-		return default 
+    # First try *nix detection.  Nabbed from console.py:
+    try:
+        import fcntl # will fail on non-*nix
+        import array
+        import termios
+        terminfo = fcntl.ioctl(sys.stderr, termios.TIOCGWINSZ, "\0" * 8)
+        width =  array.array("h", terminfo)[1]
+        return width
+    except:
+        # Fallback to the "default" size
+        return default 
 
 
 if __name__ == "__main__":
-	main()
+    main()
