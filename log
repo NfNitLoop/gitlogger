@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 """
 This script prints a hierarchical log of git history that is designed to be
@@ -22,9 +22,154 @@ log | less -S
 """
 
 import subprocess
-from subprocess import PIPE
+from subprocess import PIPE, Popen, STDOUT
 import sys
 import re
+import os.path
+
+from collections import OrderedDict
+
+
+def main():
+	with pipe_through_less():
+		if args:
+			commit = args[0]
+		else:
+			commit = "HEAD"
+		logHistory(commit)
+
+class Repo:
+    def __init__(self, path, git_exe="git"):
+        self.path = path
+        self.git_exe = git_exe
+                
+    def get_commits(self, start_commit="HEAD", excludes=None):
+        """
+        Return a generator of CommitInfo items.
+        start_commit: where to start logging.
+        excludes: a list of commits we should exclude (with --not) from logged history.
+        """
+        
+        # Store information about the current Commit:
+        info = None
+
+        # Make a list of actions we should try in order if a re pattern matches:
+        handler = _LineHandler()
+        @handler.on("^commit (.+)$")
+        def handle(match):
+            nonlocal info
+            prior_info = info
+            info = CommitInfo()
+            info.id = match.group(1)
+            return prior_info
+            
+        @handler.on("^parent (.+)$")
+        def handle(match):
+            info.parents.append(match.group(1))
+            
+        @handler.on("^author (.+)$")
+        def handle(match):
+            info.author = match.group(1)
+            
+        @handler.on("^committer (.+)$")
+        def handle(match):
+            info.committer = match.group(1)
+            
+        @handler.on("^    (.*)$")
+        def handle(match):
+            info.message_lines.append(match.group(1))
+            
+        @handler.on("^tree .*|$")
+        def handle(match):
+            pass # do nothing, ignore these.
+            
+        cmd = [self.git_exe, "log", "--format=raw"]
+        if start_commit:
+            cmd.append(start_commit)
+        if excludes:
+            cmd.append("--not")
+            cmd.extend(excludes)
+                                    
+        p = Popen(
+            cmd,
+            cwd=self.path,
+            stdout=PIPE,
+            stderr=STDOUT,
+            universal_newlines=True, # text mode.
+            #bufsize=1 # line
+        )
+        # Iterate through lines of output, building up a CommitInfo object:
+        with p:
+            for line in p.stdout:
+                line = line.rstrip()
+                value = handler.handle(line)
+                if value is not None:
+                    yield value
+                    
+        if info and info.id:
+            yield info
+
+class _LineHandler:
+    """Handle line-based text input via regexes."""
+    
+    def __init__(self):
+        self.handlers = OrderedDict()
+        
+    def handle(self, line):
+        """Handle a line of input with previously declared "@on" handlers."""
+        for pattern, callback in self.handlers.items():
+            match = pattern.match(line)
+            if not match: continue
+            return callback(match)
+            
+        raise Exception("Unhandled line:", line)
+        
+    def on(self, expression):
+        """Decorator: Hook a regular expression up to an action."""
+        
+        pattern = re.compile(expression)
+        
+        def decorator(func):
+            self.handlers[pattern] = func
+            return func
+
+        return decorator
+    
+        
+class CommitInfo:
+    def __init__(self, id=None, parents=None, message_lines=None, author=None):
+        self.id = id
+        self.parents = parents
+        self.message_lines = message_lines
+        self.author = author
+        
+        if self.parents is None:
+            self.parents = []
+        if self.message_lines is None:
+            self.message_lines = []
+            
+    @property
+    def message(self):
+        return "\n".join(self.message_lines)
+
+    @property
+    def is_merge(self): return len(self.parents) > 1
+
+    @property
+    def has_parent(self): return len(self.parents) > 0
+
+    def __str__(self):
+        lines = []
+        lines.append("commit " + self.id)
+        if self.is_merge:
+            lines.append("Merge: " + " ".join(self.parents))
+        lines.append("Author: " + self.author)
+        lines.append("Date: TODO")
+        lines.append("")
+        for m in self.message_lines:
+            lines.append("    " + m)
+        lines.append("")
+        return "\n".join(lines)
 
 class IndentPrinter(object):
 	"""Utility to print lines at a given indent level."""
@@ -35,281 +180,99 @@ class IndentPrinter(object):
 		prefix = prefix * level
 		self.prefix = prefix
 
-	def println(self, lines):
-		for line in str(lines).split("\n"):
+	def print(self, text):
+		for line in str(text).split("\n"):
 			print(self.prefix + line)
+		# TODO 
 		sys.stdout.flush()
 
 	def indent(self):
 		return IndentPrinter(level=self.level + 1, width=self.width)
-		
-class GitIndent(IndentPrinter):
-	"""This indenter remembers the context of the commits which it is outputting. 
-	This allows us to check that we're not displaying duplicate entries inside of indent.
-	"""
-	def __init__(self, level=0, width=4, parent=None):
-		IndentPrinter.__init__(self, level=level, width=width)
-		self.parent = parent
-		# Which commits should we print in this indentation level?
-		self.limit_commits = None
 
-		self.__calculated = False
-		self.__commits = []
-		
-	def indent(self, limit_commits, level=None):
-		# Defualt to one more level of indentation, unless overridden:
-		if not level:
-			level = self.level + 1
-			
-		inner = GitIndent(
-			level=level
-			, width=self.width
-			, parent=self
-		)
-		
-		# If our parent is already limited, we're limited to a subset of those:
-		if self.parent is not None and self.parent.limit_commits is not None: 
-			limit_commits = limit_commits.intersection(self.parent.limit_commits)
-		
-		inner.limit_commits = limit_commits
-		return inner
-		
-	def should_print(self, commit):
-		if self.limit_commits is None:
-			# not set, we're the LHS, print everything.
-			return True
-		else: return commit in self.limit_commits
-		
-		
-		
-		
-	
-
-def get_output(*cmd):
-	"""Run a command and return its output."""	
-	p = subprocess.Popen(cmd, stderr=PIPE, stdout=PIPE)
-	(out, err) = p.communicate()
-	if err: 
-		raise Exception(err)
-	return out
-
-	
-def git_unique_commits(commit, others):
-	"""Return a set of commits found in the history of commit, but not others."""
-	if len(others) < 1:
-		raise Exception("Others can't be empty. At least not if you want a small set of commits.")
-	cmd = ["git", "log", "--pretty=format:%H", commit, "--not"]
-	cmd.extend(others)
-	return set(get_output(*cmd).split("\n"))
-	
-
-# TODO: Make this a cache:
-__commits = {}
-def lookup_commit(commit):
-	"""Get a cached CommitInfo.  Otherwise look up a batch of them to save on calls to git."""
-	if __commits.has_key(commit): return __commits[commit]
-	else: return fetch_commits(commit)
-
-def fetch_commits(commit, fetch=1000):
-	out = get_output("git", "log", "-n", str(fetch), "--parents", "--no-decorate", commit)
-	lines = out.split("\n")
-	log_lines = []
-	infos = []
-	for line in lines:
-		if line.startswith("commit ") and log_lines:	
-			#Add the previous commit to the cache: 
-			infos.append(CommitInfo(log_lines))
-			log_lines = []
-		log_lines.append(line)
-	# Catch the last commit:
-	if log_lines:
-		infos.append(CommitInfo(log_lines))
-
-	# Add them to the cache:
-	for info in infos: __commits[info.commit] = info
-	# Return the first one.  The name we used to look it up 
-	# Might not match its commit.  (Ex: HEAD) 
-	return infos[0]
-			
-			
-	
-
-# The sortof key/value pattern used in git log:
-__kv_pat = re.compile("^([^: ]+):?[ ]+(.*)$")
-
-def getKeyValue(line):
-	"""Split a line up into its key/value pair, returned as a tuple."""
-	match = __kv_pat.match(line)
-	if not match: raise "Not a key/value line: " + line
-	return match.group(1,2)
-	
-def remove_message_padding(line):
-	"""Git commit messages are padded with 4 spaces.  This removes them."""	
-	return line[4:]
-
-class CommitInfo(object):
-	@staticmethod
-	def from_commit(commit):
-		#return CommitInfo(getCommit(commit))
-		return lookup_commit(commit)
-
-	def __init__(self, lines):
-		data = {}
-		count = 0
-		for line in lines:	
-			if not line: break # end on blank line
-			(k,v) = getKeyValue(line)
-			data[k] = v
-			count = count + 1
-
-		# Break parents out of the commit:
-		commit = data["commit"].split(" ")
-		self.commit = commit[0]
-		self.parents = commit[1:]
-		# Save the original order in case parents get reordered: 
-		self.orig_parents = self.parents[:]
-		self.date = data["Date"]
-		self.author = data["Author"]
-		
-		# Count is a blank line.
-		# Git outputs a line return after the messages so the CLI will be on a new line
-		# But it's not part of the message:
-		message_lines = lines[count+1:-1]
-		self.message = message_lines
-
-		# Calculate whether the LHS needs to be changed to simplify logging:
-		self.__calc_lhs()
-		
-		
-
-	def __str__(self):
-		s =       "commit: " + self.commit
-
-		if self.is_merge:
-			if options.merges: 
-				s = s + "\nMerge:  "
-				# use short merge hashes like in Git:
-				parents = map(lambda p: p[0:7], self.parents) 
-				s = s + " ".join(parents)
-			
-			if self.is_reordered and options.reasons:
-				s = s + "\nMerge*: " + self.reorder_reason
-				
-
-		s = s + "\nAuthor: " + self.author
-		s = s + "\nDate:   " + self.date
-		# TODO: Less hacky message indentation:
-		s = s + "\n" + "\n".join(self.message)
-		s = s + "\n"
-		return s
-		
-	@property
-	def commit_line(self):
-		"""A commit: line that contains the commit and its parents hashes."""
-		hashes = [self.commit[0:16]]
-		hashes.extend([p[0:8] for p in self.parents])
-		return "commit: " + " ".join(hashes)
-
-
-	@property
-	def is_merge(self): return len(self.parents) > 1
-
-	@property
-	def has_parent(self): return len(self.parents) > 0
-
-	@property
-	def is_reordered(self):
-		"""Return true iff lhs/rhs reordering has taken place."""
-		if not self.is_merge: return False
-		return self.parents != self.orig_parents
-
-	def lhs(self):
-		"""Get the "left-hand-side" of a merge.
-		Unlike in Git, this is not specified by the order of the parents, but is 
-		calculated in a way to make history most readable."""
-		if not self.has_parent: return None
-		else: return self.parents[0]
-
-	def rhs(self):
-		"""Return all parents but the lhs."""
-		return self.parents[1:]
-
-	def __calc_lhs(self):
-		# Defaults:
-		self.reorder_reason = None 
-		
-		if not self.is_merge: return # Nothing to do
-		
-		if self.is_pull:
-			# A pull is always two commits.  Switch which one is on left:
-			self.reorder_reason = "Treating pull as merge into mainline."
-			self.parents.reverse()
-			return
-
-	def unique_commits(self, parent):
-		"""Given parent, which is one of the parents of this commit, return a list
-		of commit IDs (including parent) which are found in the history of parent
-		but not any of the other parents."""
-		
-		
-		parents = set(self.parents)
-		if parent not in parents:
-			raise Exception("Parent {} not a parent of {}!".format(parent, self.commit))
-			
-		
-		parents.remove(parent)
-		
-		return git_unique_commits(parent, parents)
-
-	# Git changes the default merge commit message depending on the type of merge. 
-	# For details, see fmt_merge_msg_title() in 
-	# https://github.com/git/git/blob/master/builtin/fmt-merge-msg.c
-	# Note: "remote-tracking branch" used to be "remote branch": 
-	# https://github.com/git/git/commit/13931236b9ee2895a98ffdbdacbd0f895956d8a8#L2L103
-	# 'git pull' does 'git fetch' then 'git merge FETCH_HEAD'
-	# Python 2.6 dosn't support non-capturing groups:  :(
-	__pull_pat = re.compile("[ ]*Merge (remote(-tracking)? )?branch '(.+/)?(.+)'( of ([^ ]+))?( into (.*))?")
-
-	@property
-	def is_pull(self):
-		"""Try to detect if this was the result of a 'git pull' from the commit message.
-		"""
-		# ex:     Merge branch 'upstream' of ssh://url/to/git into myBranch
-		if len(self.parents) != 2: return False
-		for line in self.message:
-			match = self.__pull_pat.match(line)
-			if not match: continue
-			merge_from = match.group(4)
-			# the "into" part is omitted if we're working on master:
-			merge_into = match.group(8) or "master"
-			#Merged an upstream branch w/ same name?  It was a pull.
-			return merge_from == merge_into 
-		return False
-
-	
-def logHistory(commit, printer=GitIndent()):
-	while commit:
-		# If we've reached a point that's already contained in LHS
-		# history, stop printing:
-		if not printer.should_print(commit): break 
-
-		info = CommitInfo.from_commit(commit)
-		if info.is_merge and printer.level >= options.max_depth:
-			# Print truncated merge info:
-			printer.println("(Skipping merge " + info.commit_line + ")")
-			# Don't indent further:
-			level = printer.level
-		else:
-			# Print full info & indent children:
-			printer.println(info)
-			# allow autoindent:
-			level = None
-			
-		for parent in info.rhs():
-			inner_printer = printer.indent(limit_commits=info.unique_commits(parent), level=level)
-			logHistory(parent, inner_printer)
-		# Continue logging LHS:
-		commit = info.lhs()
+def logHistory(commit_id, printer=IndentPrinter(), excludes=None, repo=None):
+    if excludes is None:
+        excludes = set()
+    
+    if repo is None:
+        repo = Repo(path=".")
+        
+    commits = Iterator(repo.get_commits(commit_id, excludes=excludes))
+    
+    while commits.has_next:
+        commit = commits.next()
+        
+        printer.print(commit)
+        
+        if not commit.is_merge:
+            continue
+            
+        # At each merge point, we stop logging and start up (at least) two 
+        # separate processes to log each merge parent separately.
+        commits.close()
+        
+        # TODO: Maybe allow dynamically choosing which side to treat as the
+        # "left hand side". 
+        lhs = commit.parents[0]
+        
+        # In *this* loop, we'll continue logging down the LHS and assume
+        # it's the "main" branch of history:
+        commits = Iterator(repo.get_commits(lhs, excludes=excludes))
+        
+        # But first, log each of the "right-hand" sides as indented merges:
+        rh_sides = commit.parents[1:]
+        for rhs in rh_sides:
+            rhs_excludes = excludes.union(set(commit.parents) - {rhs})
+            logHistory(rhs, printer=printer.indent(), excludes=rhs_excludes, repo=repo)
+                
+class Iterator:
+    """
+    Wraps a Python iterator with a classic Iterator interface which has
+    .next(), .peek(), .has_next, and .close() methods.
+    """
+    
+    def __init__(self, iterable):
+        self.inner = iter(iterable)
+        # either None (no next value), or a 1-tuple containing the value.
+        self._next_value = None
+        
+    def peek(self):
+        """Peek at the next value. Raises StopIteration if the value doesn't exist."""
+        
+        if not self._next_value:
+            self._next_value = (next(self.inner),)
+            
+        return self._next_value
+        
+    def next(self):
+        """Return the next value, or raises StopIteration if no such value."""
+        if self._next_value:
+            value = self._next_value[0]
+            self._next_value = None
+            return value
+            
+        return next(self.inner)
+        
+    @property
+    def has_next(self):
+        try:
+            self.peek()
+            return True
+        except StopIteration:
+            return False
+    
+    # Iterator is also an iterator
+    def __next__(self):
+        return self.next()
+        
+    def __iter__(self):
+        return self
+        
+    def close(self):
+        if hasattr(self.inner, "close"):
+            self.inner.close()
+    
+    def __del__(self):
+        self.close()
 
 # Use Optparse for 2.6 compatibility:
 import optparse
@@ -330,20 +293,13 @@ parser.add_option("-x", "--max-depth", dest="max_depth", default=4
 (options, args) = parser.parse_args()
 
 
-def main():
-	with pipe_through_less():
-		if args:
-			commit = args[0]
-		else:
-			commit = "HEAD"
-		logHistory(commit)
 
 def pipe_through_less():
 	"""Iff the output is an interactive terminal, automatically pipe through `less`."""
 	# TODO: Don't rely on module-globals. Gross.
 	if not options.width:
 		options.width = detect_width()
-	if not sys.stdout.isatty():
+	if not sys.stdout.isatty() or True: #TODO: Fix for Python3.
 		# Nothing to do:
 		return FakeRedirector()
 	# Otherwise, pipe our output to 'less':
