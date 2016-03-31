@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT="$0"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")"; pwd)"
-LOG="$SCRIPT_DIR/../log"
+LOG="$SCRIPT_DIR/../../log"
 
 # Use deterministic dates for deterministic output:
 GIT_DATE=946684800

@@ -22,12 +22,13 @@ log | less -S
 """
 
 import subprocess
-from subprocess import PIPE, Popen, STDOUT
 import sys
 import re
 import os.path
 
 from collections import OrderedDict
+from datetime import datetime
+from subprocess import PIPE, Popen, STDOUT
 
 
 def main():
@@ -70,11 +71,11 @@ class Repo:
             
         @handler.on("^author (.+)$")
         def handle(match):
-            info.author = match.group(1)
+            info.author_line(match.group(0))
             
         @handler.on("^committer (.+)$")
         def handle(match):
-            info.committer = match.group(1)
+            info.committer_line(match.group(0))
             
         @handler.on("^    (.*)$")
         def handle(match):
@@ -158,13 +159,53 @@ class CommitInfo:
     @property
     def has_parent(self): return len(self.parents) > 0
 
+    @property
+    def date(self): return self.author_date
+
+    def author_line(self, line):
+        """Accept the *raw* author line and grab data out of it."""
+        match = self.LINE_PAT.match(line)
+        if not match:
+            raise Exception("Invalid author line: " + line)
+
+        self.author = match.group(2)
+        self.author_timestamp = int(match.group(3))
+        self.author_tz = match.group(4)
+        
+        # Date is a string, formatted as in Git:
+        # Thu Mar 31 21:23:34 2016
+        date = datetime.fromtimestamp(self.author_timestamp)
+        self.author_date = date \
+            .strftime("%a %b %d %H:%M:%S %Y {tz}") \
+            .format(tz=self.author_tz) 
+
+    def committer_line(self, line):
+        """Accept the *raw* committer line and grab data out of it."""
+        match = self.LINE_PAT.match(line)
+        if not match:
+            raise Exception("Invalid committer line: " + line)
+
+        self.committer = match.group(2)
+        self.committer_timestamp = int(match.group(3))
+        self.committer_tz = match.group(4)
+        
+        # Date is a string, formatted as in Git:
+        # Thu Mar 31 21:23:34 2016
+        date = datetime.fromtimestamp(self.committer_timestamp)
+        self.committer_date = date \
+            .strftime("%a %b %d %H:%M:%S %Y {tz}") \
+            .format(tz=self.committer_tz) 
+
+    # Matches author/committer lines
+    LINE_PAT = re.compile("^(author|committer) (.*) ([0-9]+) ([^ ]+)$")
+
     def __str__(self):
         lines = []
         lines.append("commit " + self.id)
         if self.is_merge:
-            lines.append("Merge: " + " ".join(self.parents))
+            lines.append("Merge:  " + " ".join(self.parents))
         lines.append("Author: " + self.author)
-        lines.append("Date: TODO")
+        lines.append("Date:   " + self.date)
         lines.append("")
         for m in self.message_lines:
             lines.append("    " + m)
