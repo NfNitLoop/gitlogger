@@ -36,7 +36,8 @@ def main():
             commit = args[0]
         else:
             commit = "HEAD"
-        logHistory(commit)
+        logger = Logger()
+        logger.log(commit)
 
 class Repo:
     def __init__(self, path, git_exe="git"):
@@ -101,7 +102,6 @@ class Repo:
         # Iterate through lines of output, building up a CommitInfo object:
         with p:
             for line in p.stdout:
-                line = line.rstrip()
                 value = handler.handle(line)
                 if value is not None:
                     yield value
@@ -182,48 +182,61 @@ class IndentPrinter(object):
 
     def print(self, text):
         for line in str(text).split("\n"):
-            print(self.prefix + line)
+            print(self.prefix, line, sep="")
         # TODO 
         sys.stdout.flush()
 
     def indent(self):
         return IndentPrinter(level=self.level + 1, width=self.width)
 
-def logHistory(commit_id, printer=IndentPrinter(), excludes=None, repo=None):
-    if excludes is None:
-        excludes = set()
-    
-    if repo is None:
-        repo = Repo(path=".")
+class Logger:
+    def __init__(self, repo=None, max_depth=4):
+        if repo is None:
+            repo = Repo(path=".")
+
+        self.repo = repo
+        self.max_depth = max_depth
+
+    def log(self, commit_id, printer=IndentPrinter(), excludes=None):
+        if excludes is None:
+            excludes = set()
         
-    commits = Iterator(repo.get_commits(commit_id, excludes=excludes))
-    
-    while commits.has_next:
-        commit = commits.next()
+        commits = Iterator(self.repo.get_commits(commit_id, excludes=excludes))
         
-        printer.print(commit)
-        
-        if not commit.is_merge:
-            continue
+        while commits.has_next:
+            commit = commits.next()
             
-        # At each merge point, we stop logging and start up (at least) two 
-        # separate processes to log each merge parent separately.
-        commits.close()
-        
-        # TODO: Maybe allow dynamically choosing which side to treat as the
-        # "left hand side". 
-        lhs = commit.parents[0]
-        
-        # In *this* loop, we'll continue logging down the LHS and assume
-        # it's the "main" branch of history:
-        commits = Iterator(repo.get_commits(lhs, excludes=excludes))
-        
-        # But first, log each of the "right-hand" sides as indented merges:
-        rh_sides = commit.parents[1:]
-        for rhs in rh_sides:
-            rhs_excludes = excludes.union(set(commit.parents) - {rhs})
-            logHistory(rhs, printer=printer.indent(), excludes=rhs_excludes, repo=repo)
+            printer.print(commit)
+            
+            if not commit.is_merge:
+                continue
                 
+            # At each merge point, we stop logging and start up (at least) two 
+            # separate processes to log each merge parent separately.
+            commits.close()
+            
+            # TODO: Maybe allow dynamically choosing which side to treat as the
+            # "left hand side". 
+            lhs = commit.parents[0]
+            
+            # In *this* loop, we'll continue logging down the LHS and assume
+            # it's the "main" branch of history:
+            commits = Iterator(self.repo.get_commits(lhs, excludes=excludes))
+            
+            # But first, log each of the "right-hand" sides as indented merges:
+            rh_sides = commit.parents[1:]
+
+            if printer.level >= self.max_depth:
+                printer.print("(Max indent reached. Flattening.)")
+                printer.print("")
+                new_printer = printer
+            else:
+                new_printer = printer.indent()
+
+            for rhs in rh_sides:
+                rhs_excludes = excludes.union(set(commit.parents) - {rhs})
+                self.log(rhs, printer=new_printer, excludes=rhs_excludes)
+                    
 class Iterator:
     """
     Wraps a Python iterator with a classic Iterator interface which has
@@ -241,7 +254,7 @@ class Iterator:
         if not self._next_value:
             self._next_value = (next(self.inner),)
             
-        return self._next_value
+        return self._next_value[0]
         
     def next(self):
         """Return the next value, or raises StopIteration if no such value."""
