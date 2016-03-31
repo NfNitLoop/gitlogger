@@ -1,0 +1,93 @@
+*   commit 3729c6ed8b818498e25ce46c463b22825c8ede03 (HEAD -> master)
+|\  Merge: b0a93ec 82d0297
+| | Author: repo_a <repo_a@example.com>
+| | Date:   Sat Jan 1 00:00:16 2000 +0000
+| | 
+| |     Merge origin/master
+| |     
+| *   commit 82d02975ac979685449f4e5aabeb871a5c8d8fd2
+| |\  Merge: c4e4110 46eeaad
+| | | Author: repo_b <repo_b@example.com>
+| | | Date:   Sat Jan 1 00:00:13 2000 +0000
+| | | 
+| | |     Merge origin/master
+| | |    
+| * | commit c4e41107ec400677d230394963c18ef196593304
+| | | Author: repo_b <repo_b@example.com>
+| | | Date:   Sat Jan 1 00:00:12 2000 +0000
+| | | 
+| | |     Commit: 946684812
+| | |    
+| * | commit fc71d60a709f7b19a17de0572b0b700f4629901f
+| | | Author: repo_b <repo_b@example.com>
+| | | Date:   Sat Jan 1 00:00:11 2000 +0000
+| | | 
+| | |     Commit: 946684811
+| | |    
+* | | commit b0a93ec3e4713c708fb94894f0c23dc536d8fb0e
+| | | Author: repo_a <repo_a@example.com>
+| | | Date:   Sat Jan 1 00:00:15 2000 +0000
+| | | 
+| | |     Commit: 946684815
+| | |    
+* | | commit 1d62a09f42e1688ffd20911d541aec4a05d34994
+| |/  Author: repo_a <repo_a@example.com>
+|/|   Date:   Sat Jan 1 00:00:14 2000 +0000
+| |   
+| |       Commit: 946684814
+| |     
+* |   commit 46eeaad98862297b9457f2e24bcbd974855e3ae8
+|\ \  Merge: 6e2d170 3d4ec2e
+| |/  Author: repo_a <repo_a@example.com>
+| |   Date:   Sat Jan 1 00:00:10 2000 +0000
+| |   
+| |       Merge origin/master
+| |     
+| *   commit 3d4ec2e4043c7191b91c8c09c8c3d3e2c5f45b98
+| |\  Merge: 6e65a7d dc0fe5a
+| | | Author: repo_b <repo_b@example.com>
+| | | Date:   Sat Jan 1 00:00:07 2000 +0000
+| | | 
+| | |     Merge origin/master
+| | |    
+| * | commit 6e65a7d43c891327b2f6c8cfba55a83cf8650e20
+| | | Author: repo_b <repo_b@example.com>
+| | | Date:   Sat Jan 1 00:00:06 2000 +0000
+| | | 
+| | |     Commit: 946684806
+| | |    
+| * | commit b7fce4e77876aec5ef8858f09607a08eed31b8a7
+| | | Author: repo_b <repo_b@example.com>
+| | | Date:   Sat Jan 1 00:00:05 2000 +0000
+| | | 
+| | |     Commit: 946684805
+| | |    
+* | | commit 6e2d170e33ffea3fee13f5c37021d9c57abd1968
+| | | Author: repo_a <repo_a@example.com>
+| | | Date:   Sat Jan 1 00:00:09 2000 +0000
+| | | 
+| | |     Commit: 946684809
+| | |    
+* | | commit 47d0848ce1c4afb9d95955bdf9148e442f4097d5
+| |/  Author: repo_a <repo_a@example.com>
+|/|   Date:   Sat Jan 1 00:00:08 2000 +0000
+| |   
+| |       Commit: 946684808
+| |   
+* | commit dc0fe5ac1bbbaa11e1d3f3407cc2eb80b9f4b000
+| | Author: repo_a <repo_a@example.com>
+| | Date:   Sat Jan 1 00:00:03 2000 +0000
+| | 
+| |     Commit: 946684803
+| |   
+* | commit 7f8d7909e8a918617fea3f1180156d66b468a67b
+|/  Author: repo_a <repo_a@example.com>
+|   Date:   Sat Jan 1 00:00:02 2000 +0000
+|   
+|       Commit: 946684802
+|  
+* commit dde1da4f1ba37922645b315c2c02790a19eb28e6
+  Author: origin <origin@example.com>
+  Date:   Sat Jan 1 00:00:01 2000 +0000
+  
+      Commit: 946684801
