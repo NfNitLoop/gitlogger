@@ -80,6 +80,10 @@ class Repo:
         @handler.on("^    (.*)$")
         def handle(match):
             info.message_lines.append(match.group(1))
+
+        @handler.on("^gpgsig .*|^ [^ ].*")
+        def handle(match):
+            pass # ignore GPG signature data.
             
         @handler.on("^tree .*|$")
         def handle(match):
